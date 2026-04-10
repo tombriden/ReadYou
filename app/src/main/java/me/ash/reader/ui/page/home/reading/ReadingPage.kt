@@ -33,6 +33,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.unit.IntOffset
@@ -40,13 +41,16 @@ import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.isSpecified
 import androidx.compose.ui.unit.sp
 import kotlin.math.abs
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import me.ash.reader.R
 import me.ash.reader.infrastructure.android.TextToSpeechManager
 import me.ash.reader.infrastructure.preference.LocalPullToSwitchArticle
 import me.ash.reader.infrastructure.preference.LocalReadingAutoHideToolbar
 import me.ash.reader.infrastructure.preference.LocalReadingBoldCharacters
+import me.ash.reader.infrastructure.preference.LocalReadingRenderer
 import me.ash.reader.infrastructure.preference.LocalReadingTextLineHeight
+import me.ash.reader.infrastructure.preference.ReadingRendererPreference
 import me.ash.reader.infrastructure.preference.not
 import me.ash.reader.ui.ext.collectAsStateValue
 import me.ash.reader.ui.ext.showToast
@@ -80,6 +84,11 @@ fun ReadingPage(
     var showFullScreenImageViewer by remember { mutableStateOf(false) }
 
     var currentImageData by remember { mutableStateOf(ImageData()) }
+    var autoMarkedAsReadArticleId by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(readerState.articleId) {
+        autoMarkedAsReadArticleId = null
+    }
 
     val isShowToolBar =
         if (LocalReadingAutoHideToolbar.current.value) {
@@ -97,6 +106,7 @@ fun ReadingPage(
     //    }
 
     var bringToTop by remember { mutableStateOf(false) }
+    var viewportHeight by remember { mutableStateOf(0) }
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.surface,
@@ -204,6 +214,46 @@ fun ReadingPage(
 
                                 val scope = rememberCoroutineScope()
 
+                                val renderer = LocalReadingRenderer.current
+                                val isContentLoaded = content is ReaderState.FullContent || content is ReaderState.Description
+
+                                if (readingUiState.isUnread && isContentLoaded && autoMarkedAsReadArticleId != articleId) {
+                                    LaunchedEffect(renderer, scrollState, listState, articleId, viewportHeight) {
+                                        delay(500)
+                                        if (renderer == ReadingRendererPreference.WebView) {
+                                            snapshotFlow { Pair(scrollState.value, scrollState.maxValue) }
+                                                .collect { (value, maxValue) ->
+                                                    if (maxValue < Int.MAX_VALUE) {
+                                                        // An article is considered read if 80% of total content has been seen.
+                                                        // Total height = viewportHeight + maxValue
+                                                        // 80% of Total height = (viewportHeight + maxValue) * 0.8
+                                                        // Seen height = viewportHeight + value
+                                                        val totalHeight = viewportHeight + maxValue
+                                                        val seenHeight = viewportHeight + value
+                                                        if (totalHeight > 0 && (seenHeight >= totalHeight * 0.8f || !scrollState.canScrollForward)) {
+                                                            viewModel.updateReadStatus(false)
+                                                            autoMarkedAsReadArticleId = articleId
+                                                        }
+                                                    }
+                                                }
+                                        } else {
+                                            snapshotFlow { listState.layoutInfo }
+                                                .collect { layoutInfo ->
+                                                    val total = layoutInfo.totalItemsCount
+                                                    if (total > 0) {
+                                                        val lastVisible = layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+                                                        val visibleCount = layoutInfo.visibleItemsInfo.size
+                                                        // Mark as read if 80% of items have been reached, or 80% of items are visible at once
+                                                        if (lastVisible >= (total * 0.8f).toInt() || visibleCount >= total * 0.8f || !listState.canScrollForward) {
+                                                            viewModel.updateReadStatus(false)
+                                                            autoMarkedAsReadArticleId = articleId
+                                                        }
+                                                    }
+                                                }
+                                        }
+                                    }
+                                }
+
                                 LaunchedEffect(bringToTop) {
                                     if (bringToTop) {
                                         scope
@@ -239,7 +289,9 @@ fun ReadingPage(
                                         }
                                 ) {
                                     Box(
-                                        modifier = Modifier.fillMaxSize(),
+                                        modifier = Modifier.fillMaxSize().onGloballyPositioned {
+                                            viewportHeight = it.size.height
+                                        },
                                         contentAlignment = Alignment.Center,
                                     ) {
                                         Content(
