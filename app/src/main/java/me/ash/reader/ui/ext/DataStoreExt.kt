@@ -184,6 +184,7 @@ sealed interface PreferencesKey {
         const val readingImageMaximize = "readingImageMaximize"
         const val readingImageHorizontalPadding = "readingImageHorizontalPadding"
         const val readingImageRoundedCorners = "readingImageRoundedCorners"
+        const val readingReadThreshold = "readingReadThreshold"
 
         // Interaction
         const val initialPage = "initialPage"
@@ -261,6 +262,7 @@ sealed interface PreferencesKey {
                 BooleanKey(readingImageMaximize),
                 IntKey(readingImageHorizontalPadding),
                 IntKey(readingImageRoundedCorners),
+                IntKey(readingReadThreshold),
                 // Interaction
                 IntKey(initialPage),
                 IntKey(initialFilter),
@@ -346,6 +348,7 @@ data class DataStoreKey<T>(val key: Preferences.Key<T>, val type: Class<T>) {
         const val readingImageMaximize = "readingImageMaximize"
         const val readingImageHorizontalPadding = "readingImageHorizontalPadding"
         const val readingImageRoundedCorners = "readingImageRoundedCorners"
+        const val readingReadThreshold = "readingReadThreshold"
 
         // Interaction
         const val initialPage = "initialPage"
@@ -490,6 +493,8 @@ data class DataStoreKey<T>(val key: Preferences.Key<T>, val type: Class<T>) {
                     DataStoreKey(intPreferencesKey(readingImageHorizontalPadding), Int::class.java),
                 readingImageRoundedCorners to
                     DataStoreKey(intPreferencesKey(readingImageRoundedCorners), Int::class.java),
+                readingReadThreshold to
+                    DataStoreKey(intPreferencesKey(readingReadThreshold), Int::class.java),
                 // Interaction
                 initialPage to DataStoreKey(intPreferencesKey(initialPage), Int::class.java),
                 initialFilter to DataStoreKey(intPreferencesKey(initialFilter), Int::class.java),
