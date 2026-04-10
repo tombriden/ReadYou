@@ -25,8 +25,12 @@ import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.Movie
 import androidx.compose.material.icons.rounded.Title
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Slider
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -39,21 +43,25 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
 import me.ash.reader.R
+import me.ash.reader.infrastructure.preference.LocalMarkAsReadOnScroll
 import me.ash.reader.infrastructure.preference.LocalPullToSwitchArticle
 import me.ash.reader.infrastructure.preference.LocalReadingAutoHideToolbar
 import me.ash.reader.infrastructure.preference.LocalReadingBoldCharacters
 import me.ash.reader.infrastructure.preference.LocalReadingFonts
 import me.ash.reader.infrastructure.preference.LocalReadingPageTonalElevation
+import me.ash.reader.infrastructure.preference.LocalReadingReadThreshold
 import me.ash.reader.infrastructure.preference.LocalReadingRenderer
 import me.ash.reader.infrastructure.preference.LocalReadingTheme
 import me.ash.reader.infrastructure.preference.ReadingFontsPreference
 import me.ash.reader.infrastructure.preference.ReadingPageTonalElevationPreference
+import me.ash.reader.infrastructure.preference.ReadingReadThresholdPreference
 import me.ash.reader.infrastructure.preference.ReadingRendererPreference
 import me.ash.reader.infrastructure.preference.ReadingThemePreference
 import me.ash.reader.infrastructure.preference.not
 import me.ash.reader.ui.component.ReadingThemePrev
 import me.ash.reader.ui.component.base.DisplayText
 import me.ash.reader.ui.component.base.FeedbackIconButton
+import me.ash.reader.ui.component.base.RYDialog
 import me.ash.reader.ui.component.base.RYScaffold
 import me.ash.reader.ui.component.base.RYSwitch
 import me.ash.reader.ui.component.base.RadioDialog
@@ -84,10 +92,14 @@ fun ReadingStylePage(
     val pullToSwitchArticle = LocalPullToSwitchArticle.current
     val renderer = LocalReadingRenderer.current
     val boldCharacters = LocalReadingBoldCharacters.current
+    val markAsReadOnScroll = LocalMarkAsReadOnScroll.current
+    val readThreshold = LocalReadingReadThreshold.current
 
     var tonalElevationDialogVisible by remember { mutableStateOf(false) }
     var rendererDialogVisible by remember { mutableStateOf(false) }
     var fontsDialogVisible by remember { mutableStateOf(false) }
+    var readThresholdDialogVisible by remember { mutableStateOf(false) }
+    var tempThreshold by remember(readThreshold) { mutableFloatStateOf(readThreshold.toFloat()) }
 
     val launcher =
         rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -211,6 +223,26 @@ fun ReadingStylePage(
                             pullToSwitchArticle.toggle(context, scope)
                         })
                     }
+
+                    SettingItem(
+                        title = stringResource(R.string.mark_as_read_on_scroll),
+                        onClick = {
+                            markAsReadOnScroll.toggle(context, scope)
+                        },
+                    ) {
+                        RYSwitch(activated = markAsReadOnScroll.value) {
+                            markAsReadOnScroll.toggle(context, scope)
+                        }
+                    }
+                    SettingItem(
+                        title = stringResource(R.string.reading_read_threshold),
+                        desc = "${readThreshold}%",
+                        enabled = markAsReadOnScroll.value,
+                        onClick = {
+                            readThresholdDialogVisible = true
+                        },
+                    ) {}
+
                     Subtitle(
                         modifier = Modifier.padding(horizontal = 24.dp),
                         text = stringResource(R.string.toolbars)
@@ -316,4 +348,41 @@ fun ReadingStylePage(
     ) {
         fontsDialogVisible = false
     }
+
+    RYDialog(
+        visible = readThresholdDialogVisible,
+        title = { Text(text = stringResource(R.string.reading_read_threshold)) },
+        text = {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Slider(
+                    modifier = Modifier.weight(1f),
+                    value = tempThreshold,
+                    onValueChange = { tempThreshold = it },
+                    valueRange = 0f..100f,
+                    steps = 99
+                )
+                Text(
+                    modifier = Modifier.width(36.dp),
+                    text = "${tempThreshold.toInt()}%",
+                    style = MaterialTheme.typography.labelLarge
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                ReadingReadThresholdPreference.put(context, scope, tempThreshold.toInt())
+                readThresholdDialogVisible = false
+            }) {
+                Text(text = stringResource(id = R.string.done))
+            }
+        },
+        onDismissRequest = {
+            readThresholdDialogVisible = false
+            tempThreshold = readThreshold.toFloat()
+        }
+    )
 }

@@ -28,7 +28,6 @@ import me.ash.reader.infrastructure.preference.LocalArticleListSwipeStartAction
 import me.ash.reader.infrastructure.preference.LocalHideEmptyGroups
 import me.ash.reader.infrastructure.preference.LocalInitialFilter
 import me.ash.reader.infrastructure.preference.LocalInitialPage
-import me.ash.reader.infrastructure.preference.LocalMarkAsReadOnScroll
 import me.ash.reader.infrastructure.preference.LocalOpenLink
 import me.ash.reader.infrastructure.preference.LocalOpenLinkSpecificBrowser
 import me.ash.reader.infrastructure.preference.LocalPullToSwitchArticle
@@ -61,7 +60,6 @@ fun InteractionPage(
     val initialFilter = LocalInitialFilter.current
     val swipeToStartAction = LocalArticleListSwipeStartAction.current
     val swipeToEndAction = LocalArticleListSwipeEndAction.current
-    val markAsReadOnScroll = LocalMarkAsReadOnScroll.current
     val hideEmptyGroups = LocalHideEmptyGroups.current
     val sortUnreadArticles = LocalSortUnreadArticles.current
     val pullToSwitchArticle = LocalPullToSwitchArticle.current
@@ -164,17 +162,6 @@ fun InteractionPage(
                         },
                         desc = sortUnreadArticles.description()
                     ) {
-                    }
-
-                    SettingItem(
-                        title = stringResource(R.string.mark_as_read_on_scroll),
-                        onClick = {
-                            markAsReadOnScroll.toggle(context, scope)
-                        },
-                    ) {
-                        RYSwitch(activated = markAsReadOnScroll.value) {
-                            markAsReadOnScroll.toggle(context, scope)
-                        }
                     }
 
                     SettingItem(
