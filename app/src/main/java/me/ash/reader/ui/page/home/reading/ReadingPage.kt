@@ -45,9 +45,11 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import me.ash.reader.R
 import me.ash.reader.infrastructure.android.TextToSpeechManager
+import me.ash.reader.infrastructure.preference.LocalMarkAsReadOnScroll
 import me.ash.reader.infrastructure.preference.LocalPullToSwitchArticle
 import me.ash.reader.infrastructure.preference.LocalReadingAutoHideToolbar
 import me.ash.reader.infrastructure.preference.LocalReadingBoldCharacters
+import me.ash.reader.infrastructure.preference.LocalReadingReadThreshold
 import me.ash.reader.infrastructure.preference.LocalReadingRenderer
 import me.ash.reader.infrastructure.preference.LocalReadingTextLineHeight
 import me.ash.reader.infrastructure.preference.ReadingRendererPreference
@@ -78,6 +80,8 @@ fun ReadingPage(
     val readingUiState = viewModel.readingUiState.collectAsStateValue()
     val readerState = viewModel.readerStateStateFlow.collectAsStateValue()
     val boldCharacters = LocalReadingBoldCharacters.current
+    val markAsReadOnScroll = LocalMarkAsReadOnScroll.current
+    val readThreshold = LocalReadingReadThreshold.current
     val coroutineScope = rememberCoroutineScope()
 
     var isReaderScrollingDown by remember { mutableStateOf(false) }
@@ -217,22 +221,24 @@ fun ReadingPage(
                                 val renderer = LocalReadingRenderer.current
                                 val isContentLoaded = content is ReaderState.FullContent || content is ReaderState.Description
 
-                                if (readingUiState.isUnread && isContentLoaded && autoMarkedAsReadArticleId != articleId) {
-                                    LaunchedEffect(renderer, scrollState, listState, articleId, viewportHeight) {
+                                if (readingUiState.isUnread && isContentLoaded && autoMarkedAsReadArticleId != articleId && markAsReadOnScroll.value) {
+                                    LaunchedEffect(renderer, scrollState, listState, articleId, viewportHeight, readThreshold) {
                                         delay(500)
                                         if (renderer == ReadingRendererPreference.WebView) {
                                             snapshotFlow { Pair(scrollState.value, scrollState.maxValue) }
                                                 .collect { (value, maxValue) ->
                                                     if (maxValue < Int.MAX_VALUE) {
-                                                        // An article is considered read if 80% of total content has been seen.
+                                                        // An article is considered read if the threshold of total content has been seen.
                                                         // Total height = viewportHeight + maxValue
-                                                        // 80% of Total height = (viewportHeight + maxValue) * 0.8
                                                         // Seen height = viewportHeight + value
                                                         val totalHeight = viewportHeight + maxValue
                                                         val seenHeight = viewportHeight + value
-                                                        if (totalHeight > 0 && (seenHeight >= totalHeight * 0.8f || !scrollState.canScrollForward)) {
-                                                            viewModel.updateReadStatus(false)
-                                                            autoMarkedAsReadArticleId = articleId
+                                                        val threshold = readThreshold / 100f
+                                                        if (totalHeight > 0 && (seenHeight >= totalHeight * threshold || !scrollState.canScrollForward)) {
+                                                            if (viewModel.readingUiState.value.articleWithFeed?.article?.id == articleId) {
+                                                                viewModel.updateReadStatus(false)
+                                                                autoMarkedAsReadArticleId = articleId
+                                                            }
                                                         }
                                                     }
                                                 }
@@ -243,10 +249,13 @@ fun ReadingPage(
                                                     if (total > 0) {
                                                         val lastVisible = layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
                                                         val visibleCount = layoutInfo.visibleItemsInfo.size
-                                                        // Mark as read if 80% of items have been reached, or 80% of items are visible at once
-                                                        if (lastVisible >= (total * 0.8f).toInt() || visibleCount >= total * 0.8f || !listState.canScrollForward) {
-                                                            viewModel.updateReadStatus(false)
-                                                            autoMarkedAsReadArticleId = articleId
+                                                        val threshold = readThreshold / 100f
+                                                        // Mark as read if the threshold of items have been reached, or the threshold of items are visible at once
+                                                        if (lastVisible >= (total * threshold).toInt() || visibleCount >= total * threshold || !listState.canScrollForward) {
+                                                            if (viewModel.readingUiState.value.articleWithFeed?.article?.id == articleId) {
+                                                                viewModel.updateReadStatus(false)
+                                                                autoMarkedAsReadArticleId = articleId
+                                                            }
                                                         }
                                                     }
                                                 }
