@@ -12,6 +12,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.core.app.NotificationManagerCompat
@@ -28,8 +29,12 @@ import java.lang.reflect.Field
 import javax.inject.Inject
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import me.ash.reader.domain.data.DiffMapHolder
 import me.ash.reader.domain.data.FilterStateUseCase
 import me.ash.reader.domain.service.AccountService
+import me.ash.reader.domain.service.RssService
 import me.ash.reader.domain.service.WidgetUpdateWorker
 import me.ash.reader.infrastructure.compose.ProvideCompositionLocals
 import me.ash.reader.infrastructure.preference.AccountSettingsProvider
@@ -37,9 +42,11 @@ import me.ash.reader.infrastructure.preference.InitialPagePreference
 import me.ash.reader.infrastructure.preference.LanguagesPreference
 import me.ash.reader.infrastructure.preference.LocalDarkTheme
 import me.ash.reader.infrastructure.preference.SettingsProvider
+import me.ash.reader.ui.ext.dollarFirst
 import me.ash.reader.ui.ext.initialPage
 import me.ash.reader.ui.ext.isFirstLaunch
 import me.ash.reader.ui.ext.languages
+import me.ash.reader.ui.ext.openURL
 import me.ash.reader.ui.page.common.ExtraName
 import me.ash.reader.ui.page.home.feeds.subscribe.SubscribeViewModel
 import me.ash.reader.ui.page.nav3.AppEntry
@@ -59,6 +66,10 @@ class MainActivity : AppCompatActivity() {
     @Inject lateinit var workManager: WorkManager
 
     @Inject lateinit var filterUseCase: FilterStateUseCase
+
+    @Inject lateinit var rssService: RssService
+
+    @Inject lateinit var diffMapHolder: DiffMapHolder
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -104,7 +115,7 @@ class MainActivity : AppCompatActivity() {
                         AppTheme(useDarkTheme = LocalDarkTheme.current.isDarkTheme()) {
                             val isFirstLaunch = remember { isFirstLaunch }
                             val initialPage = remember { initialPage }
-                            val launchAction = intent.getLaunchAction()
+                            val launchAction = remember { intent.getLaunchAction() }
 
                             val startDestination = remember {
                                 if (isFirstLaunch) listOf(Route.Startup)
@@ -115,10 +126,14 @@ class MainActivity : AppCompatActivity() {
                                                 launchAction.feedId,
                                                 launchAction.groupId,
                                             )
-                                            listOf(
-                                                Route.Feeds,
-                                                Route.Reading(launchAction.articleId),
-                                            )
+                                            if (launchAction.isBrowser && launchAction.articleLink != null) {
+                                                listOf(Route.Feeds, Route.Reading(null))
+                                            } else {
+                                                listOf(
+                                                    Route.Feeds,
+                                                    Route.Reading(launchAction.articleId),
+                                                )
+                                            }
                                         }
                                         is LaunchAction.Subscribe -> {
                                             subscribeViewModel.handleSharedUrlFromIntent(
@@ -137,6 +152,15 @@ class MainActivity : AppCompatActivity() {
                             }
 
                             val backStack = rememberNavBackStack(*startDestination.toTypedArray())
+
+                            LaunchedEffect(launchAction) {
+                                if (launchAction is LaunchAction.OpenArticle && launchAction.isBrowser && launchAction.articleLink != null) {
+                                    markArticleReadAndOpenInBrowser(
+                                        launchAction.articleId,
+                                        launchAction.articleLink,
+                                    )
+                                }
+                            }
 
                             NewIntentHandlerEffect(backStack, subscribeViewModel)
                             AppEntry(backStack)
@@ -159,7 +183,7 @@ class MainActivity : AppCompatActivity() {
                     intent.getLaunchAction()?.let { action ->
                         when (action) {
                             is LaunchAction.OpenArticle -> {
-                                val (articleId, feedId, groupId) = action
+                                val (articleId, feedId, groupId, isBrowser, articleLink) = action
                                 filterUseCase.init(feedId, groupId)
                                 val readingIndex = backStack.indexOfFirst { it is Route.Reading }
                                 if (readingIndex != -1) {
@@ -167,9 +191,16 @@ class MainActivity : AppCompatActivity() {
                                         backStack.removeLastOrNull()
                                     }
                                 }
-                                scope.launch {
-                                    delay(500L)
-                                    backStack.add(Reading(articleId = articleId))
+                                if (isBrowser && articleLink != null) {
+                                    backStack.add(Reading(articleId = null))
+                                    scope.launch {
+                                        markArticleReadAndOpenInBrowser(articleId, articleLink)
+                                    }
+                                } else {
+                                    scope.launch {
+                                        delay(500L)
+                                        backStack.add(Reading(articleId = articleId))
+                                    }
                                 }
                             }
 
@@ -215,13 +246,48 @@ class MainActivity : AppCompatActivity() {
         WidgetUpdateWorker.enqueueOneTimeWork(workManager)
         super.onResume()
     }
+
+    /**
+     * Marks the given article as read and then opens its link in the browser, per the user's
+     * link-opening preference. Used when a feed is configured to open articles in the browser
+     * (`Feed.isBrowser`) rather than the in-app reader.
+     *
+     * Marking as read goes through [DiffMapHolder], the same optimistic-update path an in-app
+     * click on a browser-feed article uses (see `FlowPage`'s `onClick`), so the article stays
+     * visible-but-read in the Unread list (instead of vanishing immediately) until the diff is
+     * later committed to the database — matching the in-app back-navigation experience.
+     */
+    private suspend fun markArticleReadAndOpenInBrowser(articleId: String, articleLink: String) {
+        try {
+            // The article's account id is encoded as the prefix of its composite id. Diffs are
+            // committed against the currently active account, so if the article belongs to a
+            // different (background) account, skip marking it read rather than silently writing
+            // against the wrong account's rows.
+            if (articleId.dollarFirst() == accountService.getCurrentAccountId()) {
+                withContext(Dispatchers.IO) { rssService.get().findArticleById(articleId) }
+                    ?.let { diffMapHolder.updateDiff(it, isUnread = false) }
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+        openURL(
+            articleLink,
+            settingsProvider.settings.openLink,
+            settingsProvider.settings.openLinkSpecificBrowser,
+        )
+    }
 }
 
 sealed interface LaunchAction {
     data class Subscribe(val url: String) : LaunchAction
 
-    data class OpenArticle(val articleId: String, val feedId: String?, val groupId: String?) :
-        LaunchAction
+    data class OpenArticle(
+        val articleId: String,
+        val feedId: String?,
+        val groupId: String?,
+        val isBrowser: Boolean,
+        val articleLink: String?,
+    ) : LaunchAction
 
     data class OpenArticleList(val accountId: Int?, val feedId: String?, val groupId: String?) :
         LaunchAction
@@ -246,13 +312,15 @@ private fun Intent.getLaunchAction(): LaunchAction? {
             val groupId =
                 getStringExtra(ExtraName.GROUP_ID)?.also { removeExtra(ExtraName.GROUP_ID) }
             val accountId = getIntExtra(ExtraName.ACCOUNT_ID, -1)
+            val isBrowser = getBooleanExtra(ExtraName.IS_BROWSER, false).also { removeExtra(ExtraName.IS_BROWSER) }
+            val articleLink = getStringExtra(ExtraName.ARTICLE_LINK)?.also { removeExtra(ExtraName.ARTICLE_LINK) }
 
             if (accountId != -1) {
                 removeExtra(ExtraName.ACCOUNT_ID)
             }
 
             if (articleId != null) {
-                LaunchAction.OpenArticle(articleId, feedId, groupId)
+                LaunchAction.OpenArticle(articleId, feedId, groupId, isBrowser, articleLink)
             } else if (feedId != null || groupId != null || accountId != -1) {
                 LaunchAction.OpenArticleList(
                     accountId = if (accountId != -1) accountId else null,
