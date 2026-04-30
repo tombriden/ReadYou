@@ -82,7 +82,6 @@ constructor(
                             )
                             .build()
                     )
-                    .setInitialDelay(syncInterval.value, TimeUnit.MINUTES)
                     .build(),
             )
         }
