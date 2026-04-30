@@ -7,4 +7,7 @@ object ExtraName {
     const val GROUP_ID: String = "group.id"
 
     const val ACCOUNT_ID:String = "account.id"
+
+    const val IS_BROWSER: String = "is.browser"
+    const val ARTICLE_LINK: String = "article.link"
 }

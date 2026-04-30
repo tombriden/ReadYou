@@ -95,6 +95,12 @@ constructor(
                                         Intent.FLAG_ACTIVITY_NEW_TASK or
                                             Intent.FLAG_ACTIVITY_CLEAR_TASK
                                     putExtra(ExtraName.ARTICLE_ID, article.id)
+                                    putExtra(ExtraName.FEED_ID, feed.id)
+                                    putExtra(ExtraName.GROUP_ID, feed.groupId)
+                                    if (feed.isBrowser) {
+                                        putExtra(ExtraName.IS_BROWSER, true)
+                                        putExtra(ExtraName.ARTICLE_LINK, article.link)
+                                    }
                                 },
                                 PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
                             )
